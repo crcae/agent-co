@@ -18,6 +18,30 @@ from dotenv import load_dotenv
 load_dotenv()
 genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 
+# --- Caching & Resources ---
+
+@st.cache_resource
+def load_embeddings():
+    """
+    Loads and caches the HuggingFace Embeddings model.
+    This prevents reloading the model (which is heavy) on every interaction.
+    """
+    return HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+
+@st.cache_resource
+def load_vector_store():
+    """
+    Loads and caches the FAISS Vector Store from disk.
+    This prevents reading from the hard drive on every interaction.
+    """
+    embeddings = load_embeddings()
+    if os.path.exists("faiss_index_store"):
+        try:
+            return FAISS.load_local("faiss_index_store", embeddings, allow_dangerous_deserialization=True)
+        except Exception as e:
+            return None
+    return None
+
 # --- Core Logic: Source of Truth & Ingestion ---
 
 def save_uploaded_files(pdf_docs):
@@ -75,10 +99,8 @@ def create_vector_store(chunks):
     Creates and saves a FAISS vector store from document chunks using local HuggingFace embeddings.
     Saves to 'faiss_index_store' folder.
     """
-    # Use local HuggingFace embeddings (Free & Unlimited)
-    embeddings = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2"
-    )
+    # Use cached embeddings
+    embeddings = load_embeddings()
     
     # Create vector store from documents (preserves metadata)
     vector_store = FAISS.from_documents(chunks, embedding=embeddings)
@@ -97,6 +119,10 @@ def process_documents():
     
     chunks = get_document_chunks(documents)
     create_vector_store(chunks)
+    
+    # Clear the cache so the new index is loaded next time
+    load_vector_store.clear()
+    
     return True, f"Procesados {len(documents)} páginas de {len(set(d.metadata['source'] for d in documents))} archivos."
 
 def delete_files(files_to_delete):
@@ -198,11 +224,10 @@ def get_admin_panel():
         st.info("Escribe un término para ver qué fragmentos exactos recupera el cerebro.")
         test_query = st.text_input("Prueba qué está viendo el cerebro (ej. 'Mucopolisacaridosis')")
         if test_query:
-            if os.path.exists("faiss_index_store"):
-                # Load Embeddings & Vector Store
-                embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+            # Use cached vector store
+            new_db = load_vector_store()
+            if new_db:
                 try:
-                    new_db = FAISS.load_local("faiss_index_store", embeddings, allow_dangerous_deserialization=True)
                     # Search with k=5
                     docs = new_db.similarity_search(test_query, k=5)
                     
@@ -236,24 +261,15 @@ def get_chat_interface():
     """
     st.header("💬 Asistente para Asesores")
     
-    # Check if knowledge base exists
-    if not os.path.exists("faiss_index_store"):
+    # Use cached vector store
+    new_db = load_vector_store()
+    
+    if not new_db:
         st.warning("⚠️ Sistema no inicializado. Por favor pida al Administrador que cargue los documentos en el Panel de Admin.")
         return
 
-    # Load Embeddings
-    embeddings = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2"
-    )
-    
-    # Load Vector Store
-    try:
-        new_db = FAISS.load_local("faiss_index_store", embeddings, allow_dangerous_deserialization=True)
-        # Optimization: Use MMR with aggressive retrieval (k=50) for Gemini 2.0 Flash context window
-        retriever = new_db.as_retriever(search_type="mmr", search_kwargs={"k": 50, "fetch_k": 100})
-    except Exception as e:
-        st.error(f"Error al cargar la base de datos: {e}")
-        return
+    # Optimization: Use MMR with aggressive retrieval (k=50) for Gemini 2.0 Flash context window
+    retriever = new_db.as_retriever(search_type="mmr", search_kwargs={"k": 50, "fetch_k": 100})
 
     # Initialize Chat Logic
     if "conversation" not in st.session_state or st.session_state.conversation is None:
@@ -360,12 +376,17 @@ def get_chat_interface():
 def main():
     st.set_page_config(page_title="Asistente de Seguros", page_icon="🛡️", layout="wide")
     
+    # Startup Cache Warming
+    # Try to load the vector store immediately so it's ready for the user
+    if os.path.exists("faiss_index_store"):
+        load_vector_store()
+    
     # Sidebar Navigation
     st.sidebar.title("Navegación")
     mode = st.sidebar.radio("Seleccione Modo:", ["💬 Chat Asistente", "🔒 Panel Admin"])
     
     st.sidebar.markdown("---")
-    st.sidebar.info("Sistema RAG Multi-PDF\nv2.1")
+    st.sidebar.info("Sistema RAG Multi-PDF\nv2.2 (Optimized)")
 
     if mode == "🔒 Panel Admin":
         get_admin_panel()
