@@ -376,12 +376,25 @@ def get_chat_interface():
 def main():
     st.set_page_config(page_title="Asistente de Seguros", page_icon="🛡️", layout="wide")
     
-    # --- CÓDIGO PARA OCULTAR ELEMENTOS (PEGA ESTO AQUÍ) ---
+# --- CÓDIGO PARA OCULTAR ELEMENTOS (ACTUALIZADO) ---
     hide_streamlit_style = """
                 <style>
+                /* Oculta el menú de hamburguesa (3 rayas) */
                 #MainMenu {visibility: hidden;}
-                footer {visibility: hidden;}
+                
+                /* Oculta la barra superior (Header) */
                 header {visibility: hidden;}
+                
+                /* Oculta el pie de página (Hosted with Streamlit) de forma agresiva */
+                footer {
+                    visibility: hidden;
+                    display: none !important;
+                }
+                
+                /* En caso de que persista, ocultar el contenedor específico del footer */
+                .stApp > footer {
+                    display: none !important;
+                }
                 </style>
                 """
     st.markdown(hide_streamlit_style, unsafe_allow_html=True)
