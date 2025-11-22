@@ -18,55 +18,111 @@ from dotenv import load_dotenv
 load_dotenv()
 genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 
+# --- CONFIGURACIÓN DE PÁGINA (UI MODERNIZADA) ---
+st.set_page_config(
+    page_title="Asistente SMNYL",
+    page_icon="🛡️",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# --- ESTILOS CSS PERSONALIZADOS (GOOGLE MATERIAL STYLE) ---
+st.markdown("""
+    <style>
+        /* Fuente global */
+        @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;700&display=swap');
+        html, body, [class*="css"] {
+            font-family: 'Roboto', sans-serif;
+        }
+        
+        /* Ocultar elementos nativos */
+        header[data-testid="stHeader"] {visibility: hidden; height: 0%;}
+        #MainMenu {visibility: hidden; display: none;}
+        footer {visibility: hidden; display: none;}
+        div[data-testid="stDecoration"] {visibility: hidden; height: 0%; display: none;}
+        .stDeployButton {display: none;}
+
+        /* Chat Messages - Estilo Burbuja Moderna */
+        .stChatMessage {
+            background-color: transparent;
+            border-radius: 10px;
+            padding: 10px;
+            margin-bottom: 10px;
+        }
+        
+        /* Input del chat fijo abajo y estilizado */
+        .stChatInput {
+            border-radius: 20px !important;
+        }
+
+        /* Sidebar moderna */
+        section[data-testid="stSidebar"] {
+            background-color: #f8f9fa; /* Gris muy claro estilo Google */
+            border-right: 1px solid #e0e0e0;
+        }
+        
+        /* Botones primarios estilo Google Blue */
+        div.stButton > button:first-child {
+            background-color: #1a73e8;
+            color: white;
+            border-radius: 8px;
+            border: none;
+            padding: 10px 24px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+        }
+        div.stButton > button:first-child:hover {
+            background-color: #1557b0;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+
+        /* Botones de alerta (Borrar) */
+        div.stButton > button.delete-btn {
+            background-color: #d93025;
+        }
+
+        /* Tarjetas para archivos */
+        div.file-card {
+            background-color: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24);
+            margin-bottom: 10px;
+        }
+    </style>
+""", unsafe_allow_html=True)
+
 # --- Caching & Resources ---
 
 @st.cache_resource
 def load_embeddings():
-    """
-    Loads and caches the HuggingFace Embeddings model.
-    This prevents reloading the model (which is heavy) on every interaction.
-    """
     return HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
 
 @st.cache_resource
 def load_vector_store():
-    """
-    Loads and caches the FAISS Vector Store from disk.
-    This prevents reading from the hard drive on every interaction.
-    """
     embeddings = load_embeddings()
     if os.path.exists("faiss_index_store"):
         try:
             return FAISS.load_local("faiss_index_store", embeddings, allow_dangerous_deserialization=True)
-        except Exception as e:
+        except Exception:
             return None
     return None
 
-# --- Core Logic: Source of Truth & Ingestion ---
+# --- Core Logic --- (Misma funcionalidad, sin cambios)
 
 def save_uploaded_files(pdf_docs):
-    """
-    Saves uploaded PDF files to 'saved_pdfs' directory.
-    """
     if not os.path.exists("saved_pdfs"):
         os.makedirs("saved_pdfs")
-    
     for pdf in pdf_docs:
         with open(os.path.join("saved_pdfs", pdf.name), "wb") as f:
             f.write(pdf.getbuffer())
 
 def load_documents_from_folder():
-    """
-    Scans 'saved_pdfs' folder, reads all PDFs, and returns a list of Document objects with metadata.
-    This is the 'Source of Truth' logic.
-    """
     documents = []
     if not os.path.exists("saved_pdfs"):
         os.makedirs("saved_pdfs")
         return documents
-
     files = [f for f in os.listdir("saved_pdfs") if f.endswith('.pdf')]
-    
     for filename in files:
         file_path = os.path.join("saved_pdfs", filename)
         try:
@@ -74,358 +130,184 @@ def load_documents_from_folder():
             for i, page in enumerate(pdf_reader.pages):
                 text = page.extract_text()
                 if text:
-                    # Create a Document object with text and metadata (source filename and page number)
-                    doc = Document(
-                        page_content=text,
-                        metadata={"source": filename, "page": i + 1}
-                    )
+                    doc = Document(page_content=text, metadata={"source": filename, "page": i + 1})
                     documents.append(doc)
         except Exception as e:
-            st.error(f"Error al leer {filename}: {e}")
-            
+            st.error(f"Error leyendo {filename}: {e}")
     return documents
 
 def get_document_chunks(documents):
-    """
-    Splits documents into chunks while preserving metadata.
-    """
-    # Increased chunk size to keep tables and logical sections together
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=2500, chunk_overlap=500)
     chunks = text_splitter.split_documents(documents)
     return chunks
 
 def create_vector_store(chunks):
-    """
-    Creates and saves a FAISS vector store from document chunks using local HuggingFace embeddings.
-    Saves to 'faiss_index_store' folder.
-    """
-    # Use cached embeddings
     embeddings = load_embeddings()
-    
-    # Create vector store from documents (preserves metadata)
     vector_store = FAISS.from_documents(chunks, embedding=embeddings)
-    
-    # Save locally
     vector_store.save_local("faiss_index_store")
     return True
 
 def process_documents():
-    """
-    Orchestrates the full ingestion pipeline: Load from Folder -> Split -> Embed -> Save Index.
-    """
     documents = load_documents_from_folder()
     if not documents:
-        return False, "No hay documentos en la carpeta 'saved_pdfs'."
-    
+        return False, "No hay documentos para procesar."
     chunks = get_document_chunks(documents)
     create_vector_store(chunks)
-    
-    # Clear the cache so the new index is loaded next time
     load_vector_store.clear()
-    
-    return True, f"Procesados {len(documents)} páginas de {len(set(d.metadata['source'] for d in documents))} archivos."
+    return True, f"Procesados {len(documents)} páginas."
 
 def delete_files(files_to_delete):
-    """
-    Deletes selected files from 'saved_pdfs' and triggers re-indexing.
-    """
     for filename in files_to_delete:
         file_path = os.path.join("saved_pdfs", filename)
         if os.path.exists(file_path):
             os.remove(file_path)
-    
-    # Re-index immediately to reflect changes
     success, msg = process_documents()
     return success, msg
 
 def force_reindex():
-    """
-    Deletes the existing index and rebuilds it from scratch using all files in 'saved_pdfs'.
-    """
     if os.path.exists("faiss_index_store"):
         shutil.rmtree("faiss_index_store")
-    
     return process_documents()
 
-# --- UI Components ---
+# --- UI Components Mejorados ---
 
 def get_admin_panel():
-    """
-    Renders the Admin Panel for document ingestion and management.
-    """
-    st.header("🔒 Panel de Administrador")
+    st.title("⚙️ Panel de Control")
+    st.markdown("Gestiona la base de conocimiento del asistente.")
     
-    password = st.text_input("Ingrese Contraseña de Administrador", type="password")
+    password = st.text_input("🔑 Contraseña de Acceso", type="password")
     
     if password == "admin123":
-        st.success("Acceso Concedido")
+        st.success("Sesión Iniciada")
         
-        st.subheader("Gestión de Base de Conocimiento")
+        # Pestañas para organizar mejor
+        tab1, tab2, tab3 = st.tabs(["📚 Documentos", "📥 Cargar", "🛠️ Mantenimiento"])
         
-        # 1. List and Manage Files
-        st.markdown("### 📂 Archivos en la Base de Conocimiento")
-        
-        if not os.path.exists("saved_pdfs"):
-            os.makedirs("saved_pdfs")
+        with tab1:
+            st.subheader("Archivos Activos")
+            if not os.path.exists("saved_pdfs"):
+                os.makedirs("saved_pdfs")
+            files = [f for f in os.listdir("saved_pdfs") if f.endswith('.pdf')]
             
-        files = [f for f in os.listdir("saved_pdfs") if f.endswith('.pdf')]
-        
-        if files:
-            # Display files
-            st.dataframe({"Nombre del Archivo": files}, use_container_width=True)
-            
-            # Delete Interface
-            st.markdown("#### 🗑️ Eliminar Archivos")
-            files_to_delete = st.multiselect("Seleccionar archivos para eliminar", files)
-            
-            if st.button("🗑️ Eliminar Seleccionados y Actualizar"):
-                if files_to_delete:
-                    with st.spinner("Eliminando archivos y actualizando cerebro..."):
-                        success, msg = delete_files(files_to_delete)
-                        if success:
-                            st.success("✅ Archivos eliminados y cerebro actualizado.")
-                        else:
-                            st.warning(msg) # Might happen if all files are deleted
-                        time.sleep(2)
-                        st.rerun()
-                else:
-                    st.warning("Seleccione al menos un archivo para eliminar.")
-        else:
-            st.info("No hay archivos guardados aún.")
-            
-        st.markdown("---")
-        
-        # 2. Upload New Files
-        st.markdown("### 📤 Cargar Nuevos Manuales")
-        pdf_docs = st.file_uploader("Seleccionar PDFs", accept_multiple_files=True)
-        
-        if st.button("Cargar y Actualizar Base de Conocimiento"):
-            if not pdf_docs:
-                st.warning("Por favor, sube al menos un archivo PDF.")
+            if files:
+                # Mostrar archivos como tarjetas limpias
+                for f in files:
+                    st.markdown(f"<div class='file-card'>📄 <b>{f}</b></div>", unsafe_allow_html=True)
+                
+                st.markdown("### Acciones")
+                files_to_delete = st.multiselect("Seleccionar para eliminar", files)
+                if st.button("🗑️ Eliminar y Actualizar"):
+                    if files_to_delete:
+                        with st.spinner("Actualizando base de datos..."):
+                            success, msg = delete_files(files_to_delete)
+                            if success: st.toast("✅ Archivos eliminados correctamente", icon="🗑️")
+                            time.sleep(1)
+                            st.rerun()
             else:
-                with st.spinner("Guardando archivos y procesando TODOS los documentos..."):
-                    # Save new files
-                    save_uploaded_files(pdf_docs)
-                    
-                    # Trigger full re-process
-                    success, msg = process_documents()
-                    
-                    if success:
-                        st.success(f"✅ ¡Éxito! {msg}")
-                        st.info("La base de conocimiento está sincronizada con la carpeta.")
-                    else:
-                        st.error(f"Error: {msg}")
-                        
-                    time.sleep(2)
-                    st.rerun()
+                st.info("La biblioteca está vacía.")
 
-        st.markdown("---")
-        st.markdown("### 🔍 Probador de Búsqueda (Debug)")
-        st.info("Escribe un término para ver qué fragmentos exactos recupera el cerebro.")
-        test_query = st.text_input("Prueba qué está viendo el cerebro (ej. 'Mucopolisacaridosis')")
-        if test_query:
-            # Use cached vector store
-            new_db = load_vector_store()
-            if new_db:
-                try:
-                    # Search with k=5
-                    docs = new_db.similarity_search(test_query, k=5)
-                    
-                    st.write(f"Resultados para: **'{test_query}'**")
-                    for i, doc in enumerate(docs):
-                        with st.expander(f"Resultado {i+1}: {doc.metadata.get('source', 'Desconocido')} (Pág. {doc.metadata.get('page', 'N/A')})"):
-                            st.text(doc.page_content)
-                except Exception as e:
-                    st.error(f"Error al buscar: {e}")
-            else:
-                st.warning("No hay base de datos para buscar.")
-
-        st.markdown("---")
-        st.markdown("### ⚠️ Zona de Peligro")
-        if st.button("⚠️ Forzar Re-Indexación Completa"):
-            with st.spinner("Borrando base de datos y reconstruyendo desde cero..."):
-                success, msg = force_reindex()
-                if success:
-                    st.success(f"✅ Base de datos reconstruida: {msg}")
+        with tab2:
+            st.subheader("Subir Nuevo Material")
+            pdf_docs = st.file_uploader("Arrastra tus PDFs aquí", accept_multiple_files=True, type="pdf")
+            if st.button("🚀 Procesar Archivos"):
+                if pdf_docs:
+                    with st.spinner("Leyendo y aprendiendo..."):
+                        save_uploaded_files(pdf_docs)
+                        success, msg = process_documents()
+                        if success: st.balloons()
                 else:
-                    st.error(f"Error: {msg}")
-                time.sleep(2)
-                st.rerun()
+                    st.warning("Sube un archivo primero.")
+
+        with tab3:
+            st.warning("Zona de peligro: Usa esto solo si el bot responde cosas raras.")
+            if st.button("⚠️ Resetear Cerebro (Re-Indexar)"):
+                with st.spinner("Reiniciando sistema..."):
+                    success, msg = force_reindex()
+                    if success: st.toast("Sistema reiniciado con éxito", icon="✅")
 
     elif password:
         st.error("Contraseña incorrecta")
 
 def get_chat_interface():
-    """
-    Renders the Chat Interface for Advisors.
-    """
-    st.header("💬 Asistente para Asesores")
+    st.title("💬 Asistente SMNYL")
+    st.markdown("Tu copiloto experto en seguros. Pregunta sobre coberturas, trámites o manuales.")
     
-    # Use cached vector store
     new_db = load_vector_store()
-    
     if not new_db:
-        st.warning("⚠️ Sistema no inicializado. Por favor pida al Administrador que cargue los documentos en el Panel de Admin.")
+        st.error("⚠️ El sistema está apagado. Contacta al Administrador para cargar los manuales.")
         return
 
-    # Optimization: Use MMR with aggressive retrieval (k=50) for Gemini 2.0 Flash context window
-    retriever = new_db.as_retriever(search_type="mmr", search_kwargs={"k": 50, "fetch_k": 100})
-
-    # Initialize Chat Logic
+    # Chat Logic
     if "conversation" not in st.session_state or st.session_state.conversation is None:
-         # Use gemini-2.0-flash as requested (Working version)
-         model = ChatGoogleGenerativeAI(model="gemini-2.0-flash", temperature=0.3)
-         
-         prompt_template = """
-         Eres el Asistente IA Experto de Seguros Monterrey New York Life. 
-         Tienes acceso a una biblioteca de documentos (manuales, condiciones generales, etc.).
-         Tu función es apoyar a los asesores internos con información precisa.
-
-         Instrucciones CRÍTICAS:
-         1. Al responder, consulta la información disponible en el contexto.
-         2. Si encuentras la respuesta, cita explícitamente el nombre del documento fuente.
-         3. ANTES de responder afirmativamente sobre una cobertura, DEBES verificar la sección 'VII. Exclusiones Generales'.
-         4. Regla Crítica: Si la actividad involucra 'carreras', 'pruebas de velocidad' o 'concursos' en vehículos de cualquier tipo, está EXCLUIDA.
-         5. Si encuentras una contradicción entre Cobertura y Exclusión, la Exclusión SIEMPRE gana.
-         6. Cuando te pregunten sobre rankings, estadísticas o tablas (como 'casos más costosos' o 'descuentos'), analiza cuidadosamente los fragmentos de texto sin formato, ya que el formato de tabla puede haberse perdido. Reconstruye las filas de datos para encontrar la respuesta.
-         7. Si la información NO está en el contexto, responde: "No encuentro esa información en los documentos cargados actualmente".
-
-         Contexto:
-         {context}
-
-         Pregunta:
-         {question}
-
-         Respuesta:
-         """
-         prompt = PromptTemplate(template=prompt_template, input_variables=["context", "question"])
-         
-         st.session_state.conversation = ConversationalRetrievalChain.from_llm(
-            llm=model,
-            retriever=retriever,
+        model = ChatGoogleGenerativeAI(model="gemini-2.0-flash", temperature=0.3)
+        retriever = new_db.as_retriever(search_type="mmr", search_kwargs={"k": 50, "fetch_k": 100})
+        
+        prompt_template = """
+        Eres el Asistente Experto de Seguros Monterrey. Responde de forma clara, profesional y empática.
+        Usa la siguiente información para responder. Si no sabes, dilo.
+        Contexto: {context}
+        Pregunta: {question}
+        Respuesta:
+        """
+        prompt = PromptTemplate(template=prompt_template, input_variables=["context", "question"])
+        
+        st.session_state.conversation = ConversationalRetrievalChain.from_llm(
+            llm=model, retriever=retriever,
             memory=ConversationBufferMemory(memory_key="chat_history", return_messages=True, output_key='answer'),
-            return_source_documents=True, # Enable source retrieval for citation
+            return_source_documents=True,
             combine_docs_chain_kwargs={"prompt": prompt}
         )
 
-    # Display Chat History
+    # Historial de Chat con Avatares personalizados
     if "messages" not in st.session_state:
-        st.session_state.messages = []
+        st.session_state.messages = [{"role": "assistant", "content": "¡Hola! Soy tu asistente experto. ¿En qué puedo apoyarte hoy?"}]
 
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+    for msg in st.session_state.messages:
+        # Avatar: Usa emojis o URLs de imágenes reales si prefieres
+        avatar = "🧑‍💼" if msg["role"] == "user" else "🛡️"
+        with st.chat_message(msg["role"], avatar=avatar):
+            st.markdown(msg["content"])
 
-    # Handle User Input
-    if prompt := st.chat_input("Escribe tu pregunta sobre los manuales..."):
-        # Add user message to history
+    # Input
+    if prompt := st.chat_input("Escribe tu consulta..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
+        with st.chat_message("user", avatar="🧑‍💼"):
             st.markdown(prompt)
 
-        # Generate Response
-        with st.chat_message("assistant"):
-            with st.spinner("🔍 Analizando biblioteca de documentos..."):
-                max_retries = 3
-                retry_delay = 10
-                
-                for attempt in range(max_retries):
-                    try:
-                        response = st.session_state.conversation({'question': prompt})
-                        answer = response['answer']
-                        st.markdown(answer)
-                        
-                        # Professional Source Citation
-                        sources = response.get('source_documents', [])
-                        if sources:
-                            # Deduplicate sources based on page number AND filename
-                            seen_sources = set()
-                            unique_sources = []
-                            for doc in sources:
-                                page = doc.metadata.get('page', 'N/A')
-                                source_file = doc.metadata.get('source', 'Desconocido')
-                                identifier = f"{source_file}-{page}"
-                                
-                                if identifier not in seen_sources:
-                                    seen_sources.add(identifier)
-                                    unique_sources.append(doc)
-                            
-                            # Display sources in expanders
-                            for doc in unique_sources[:3]: # Show top 3 unique sources
-                                page_num = doc.metadata.get('page', 'Desconocida')
-                                source_file = doc.metadata.get('source', 'Documento')
-                                with st.expander(f"📚 Fuente: {source_file} (Pág. {page_num})"):
-                                    st.markdown(f"**Extracto:**")
-                                    st.text(doc.page_content[:500] + "...") 
+        with st.chat_message("assistant", avatar="🛡️"):
+            with st.spinner("Analizando manuales..."):
+                try:
+                    response = st.session_state.conversation({'question': prompt})
+                    answer = response['answer']
+                    st.markdown(answer)
+                    
+                    # Fuentes limpias (Expander minimalista)
+                    sources = response.get('source_documents', [])
+                    if sources:
+                        unique_sources = list({f"{doc.metadata['source']}-{doc.metadata['page']}": doc for doc in sources}.values())[:3]
+                        with st.expander("📚 Ver fuentes consultadas"):
+                            for doc in unique_sources:
+                                st.caption(f"📄 **{doc.metadata['source']}** (Pág. {doc.metadata['page']})")
+                                st.markdown(f"_{doc.page_content[:150]}..._")
+                    
+                    st.session_state.messages.append({"role": "assistant", "content": answer})
+                except Exception as e:
+                    st.error(f"Ocurrió un error: {e}")
 
-                        st.session_state.messages.append({"role": "assistant", "content": answer})
-                        break # Success, exit loop
-                    except Exception as e:
-                        error_msg = str(e)
-                        if "429" in error_msg or "ResourceExhausted" in error_msg or "quota" in error_msg.lower():
-                            if attempt < max_retries - 1:
-                                st.warning(f"⚠️ Límite de cuota alcanzado. Reintentando en {retry_delay} segundos... (Intento {attempt + 1}/{max_retries})")
-                                time.sleep(retry_delay)
-                                retry_delay *= 2  # Exponential backoff
-                            else:
-                                st.error("❌ Se ha excedido la cuota de la API de Google. Por favor intenta de nuevo en unos minutos.")
-                        else:
-                            st.error(f"Error al generar respuesta: {e}")
-                            break
-
+# --- MAIN APP ---
 def main():
-    st.set_page_config(page_title="Asistente de Seguros", page_icon="🛡️", layout="wide")
-    
-# --- CÓDIGO NUCLEAR PARA OCULTAR ELEMENTOS ---
-    hide_streamlit_style = """
-                <style>
-                /* 1. Ocultar la barra superior completa (Header) */
-                header[data-testid="stHeader"] {
-                    visibility: hidden;
-                    height: 0%;
-                }
-                
-                /* 2. Ocultar el menú de hamburguesa (3 rayas) */
-                #MainMenu {
-                    visibility: hidden;
-                    display: none;
-                }
-                
-                /* 3. Ocultar el Footer estándar "Made with Streamlit" */
-                footer {
-                    visibility: hidden;
-                    display: none;
-                }
-                
-                /* 4. Ocultar la línea de colores decorativa de arriba */
-                div[data-testid="stDecoration"] {
-                    visibility: hidden;
-                    height: 0%;
-                    display: none;
-                }
-
-                /* 5. Intentar ocultar el botón de Deploy */
-                .stDeployButton {
-                    display: none;
-                }
-                </style>
-                """
-    st.markdown(hide_streamlit_style, unsafe_allow_html=True)
-    # -------------------------------------------------------
-
-    # Startup Cache Warming
-    # Try to load the vector store immediately so it's ready for the user
+    # Cargar caché al inicio
     if os.path.exists("faiss_index_store"):
         load_vector_store()
     
-    # Sidebar Navigation
-    st.sidebar.title("Navegación")
-    mode = st.sidebar.radio("Seleccione Modo:", ["💬 Chat Asistente", "🔒 Panel Admin"])
-    
-    st.sidebar.markdown("---")
-    st.sidebar.info("Sistema RAG Multi-PDF\nv2.2 (Optimized)")
+    # Sidebar Minimalista
+    with st.sidebar:
+        st.title("Navegación")
+        mode = st.radio("", ["💬 Chat", "⚙️ Admin"], index=0)
+        st.markdown("---")
+        st.caption("v3.0 - Powered by Gemini")
 
-    if mode == "🔒 Panel Admin":
+    if mode == "⚙️ Admin":
         get_admin_panel()
     else:
         get_chat_interface()
