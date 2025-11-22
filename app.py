@@ -376,37 +376,30 @@ def get_chat_interface():
 def main():
     st.set_page_config(page_title="Asistente de Seguros", page_icon="🛡️", layout="wide")
     
-# --- CÓDIGO NUCLEAR PARA OCULTAR ELEMENTOS ---
+# --- ESTRATEGIA PARCHE PARA TAPAR MARCA DE AGUA ---
     hide_streamlit_style = """
                 <style>
-                /* 1. Ocultar la barra superior completa (Header) */
-                header[data-testid="stHeader"] {
-                    visibility: hidden;
-                    height: 0%;
+                /* 1. Ocultar elementos estándar */
+                #MainMenu {visibility: hidden;}
+                header {visibility: hidden;}
+                footer {visibility: hidden;}
+                
+                /* 2. EL PARCHE: Un recuadro blanco fijo en la esquina inferior derecha */
+                div[data-testid="stAppViewContainer"]::after {
+                    content: "";
+                    position: fixed;
+                    bottom: 0;
+                    right: 0;
+                    width: 200px;  /* Ancho suficiente para tapar el botón */
+                    height: 40px;  /* Alto suficiente para tapar el botón */
+                    background-color: white; /* Color del fondo de tu app */
+                    z-index: 999999; /* Prioridad máxima para estar encima */
+                    pointer-events: none; /* Para no bloquear clics si te pasas de tamaño */
                 }
                 
-                /* 2. Ocultar el menú de hamburguesa (3 rayas) */
-                #MainMenu {
-                    visibility: hidden;
-                    display: none;
-                }
-                
-                /* 3. Ocultar el Footer estándar "Made with Streamlit" */
-                footer {
-                    visibility: hidden;
-                    display: none;
-                }
-                
-                /* 4. Ocultar la línea de colores decorativa de arriba */
-                div[data-testid="stDecoration"] {
-                    visibility: hidden;
-                    height: 0%;
-                    display: none;
-                }
-
-                /* 5. Intentar ocultar el botón de Deploy */
-                .stDeployButton {
-                    display: none;
+                /* 3. Intento directo de ocultar la clase del visor (a veces funciona) */
+                .viewerBadge_container__1QSob {
+                    display: none !important;
                 }
                 </style>
                 """
