@@ -376,24 +376,37 @@ def get_chat_interface():
 def main():
     st.set_page_config(page_title="Asistente de Seguros", page_icon="🛡️", layout="wide")
     
-# --- CÓDIGO PARA OCULTAR ELEMENTOS (ACTUALIZADO) ---
+# --- CÓDIGO NUCLEAR PARA OCULTAR ELEMENTOS ---
     hide_streamlit_style = """
                 <style>
-                /* Oculta el menú de hamburguesa (3 rayas) */
-                #MainMenu {visibility: hidden;}
-                
-                /* Oculta la barra superior (Header) */
-                header {visibility: hidden;}
-                
-                /* Oculta el pie de página (Hosted with Streamlit) de forma agresiva */
-                footer {
+                /* 1. Ocultar la barra superior completa (Header) */
+                header[data-testid="stHeader"] {
                     visibility: hidden;
-                    display: none !important;
+                    height: 0%;
                 }
                 
-                /* En caso de que persista, ocultar el contenedor específico del footer */
-                .stApp > footer {
-                    display: none !important;
+                /* 2. Ocultar el menú de hamburguesa (3 rayas) */
+                #MainMenu {
+                    visibility: hidden;
+                    display: none;
+                }
+                
+                /* 3. Ocultar el Footer estándar "Made with Streamlit" */
+                footer {
+                    visibility: hidden;
+                    display: none;
+                }
+                
+                /* 4. Ocultar la línea de colores decorativa de arriba */
+                div[data-testid="stDecoration"] {
+                    visibility: hidden;
+                    height: 0%;
+                    display: none;
+                }
+
+                /* 5. Intentar ocultar el botón de Deploy */
+                .stDeployButton {
+                    display: none;
                 }
                 </style>
                 """
