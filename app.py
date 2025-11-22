@@ -376,6 +376,17 @@ def get_chat_interface():
 def main():
     st.set_page_config(page_title="Asistente de Seguros", page_icon="🛡️", layout="wide")
     
+    # --- CÓDIGO PARA OCULTAR ELEMENTOS (PEGA ESTO AQUÍ) ---
+    hide_streamlit_style = """
+                <style>
+                #MainMenu {visibility: hidden;}
+                footer {visibility: hidden;}
+                header {visibility: hidden;}
+                </style>
+                """
+    st.markdown(hide_streamlit_style, unsafe_allow_html=True)
+    # -------------------------------------------------------
+
     # Startup Cache Warming
     # Try to load the vector store immediately so it's ready for the user
     if os.path.exists("faiss_index_store"):
